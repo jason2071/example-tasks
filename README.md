@@ -4,12 +4,12 @@
 
 ## What it does
 
-Provides a CRUD API for tasks with cursor-based pagination, priority filtering, and soft deletes. Built as a reference implementation of the Handler → Service → Repository pattern with explicit dependency injection.
+CRUD API for tasks with cursor-based pagination, priority filter, soft deletes, and basic health endpoints. Reference implementation of the Handler → Service → Repository pattern with explicit dependency injection.
 
 ## Requirements
 
 - Go 1.24+
-- PostgreSQL 15+ (schema `example` created by migration)
+- PostgreSQL 15+
 
 ## Quick Start
 
@@ -17,16 +17,19 @@ Provides a CRUD API for tasks with cursor-based pagination, priority filtering, 
 git clone <repo-url>
 cd example-tasks
 
-# 1. Apply the migration
+# 1. Create the schema (migration assumes it exists)
+psql -U postgres -d <your_db> -c "CREATE SCHEMA IF NOT EXISTS example;"
+
+# 2. Apply the migration
 psql -U postgres -d <your_db> -f migrations/0001_create_table_tasks.up.sql
 
-# 2. Set DB connection
+# 3. Set DB connection
 export DATABASE__HOST=localhost
 export DATABASE__USER=postgres
 export DATABASE__PASSWORD=secret
 export DATABASE__DBNAME=plms
 
-# 3. Run
+# 4. Run
 go run .
 # Fiber listens on :3000
 ```
@@ -34,22 +37,26 @@ go run .
 Verify:
 
 ```bash
-curl http://localhost:3000/
-# Hello, World!
+curl http://localhost:3000/         # Hello, World!
+curl http://localhost:3000/live     # {"status":"ok"}
+curl http://localhost:3000/ready    # {"status":"ok"}  (also pings DB)
+curl http://localhost:3000/info     # service metadata from config.yaml
 ```
 
 ## Configuration
 
-Config is embedded from `config/config.yaml` at build time. Override any key with environment variables using `__` (double underscore) as the key separator. A `.env` file in the project root is loaded automatically in local environments.
+Defaults are embedded from `config/config.yaml` at build time (`//go:embed`). Override any key with environment variables using `__` (double underscore) as the key separator. A `.env` file in the project root is loaded automatically (via `gotenv`) for local dev.
 
-| Env variable | config.yaml key | Default | Description |
+| Env variable | config.yaml key | Default | Notes |
 |---|---|---|---|
-| `DATABASE__HOST` | `database.host` | _(empty)_ | PostgreSQL host |
-| `DATABASE__PORT` | `database.port` | `5432` | PostgreSQL port |
-| `DATABASE__USER` | `database.user` | _(empty)_ | PostgreSQL user |
-| `DATABASE__PASSWORD` | `database.password` | _(empty)_ | PostgreSQL password |
-| `DATABASE__DBNAME` | `database.dbname` | _(empty)_ | Database name |
-| `DATABASE__SSLMODE` | `database.sslmode` | `disable` | `disable` / `require` / `verify-full` |
+| `DATABASE__HOST` | `database.host` | _(empty)_ | Required |
+| `DATABASE__PORT` | `database.port` | `5432` | |
+| `DATABASE__USER` | `database.user` | _(empty)_ | Required |
+| `DATABASE__PASSWORD` | `database.password` | _(empty)_ | |
+| `DATABASE__DBNAME` | `database.dbname` | _(empty)_ | Required |
+| `DATABASE__SSLMODE` | `database.sslmode` | `disable` | **Currently ignored** — `main.go` hardcodes `sslmode=disable` in the DSN. |
+
+App metadata under `app:` (`name`, `version`, `description`, `environment`) is surfaced by `GET /info`.
 
 Example `.env`:
 
@@ -63,47 +70,46 @@ DATABASE__DBNAME=plms
 ## Project Structure
 
 ```
-main.go                      # Fiber setup, DI wiring: repo → service → handler
+main.go                          # Fiber setup, DI: db -> repo -> service -> handler
 handler/
-└── task_handler.go          # HTTP layer: parse, validate, call service, return JSON
+├── task_handler.go              # /task* CRUD
+└── health_handler.go            # /live, /ready, /info
 service/
-└── task_service.go          # Business logic, secondary validation, error mapping
+├── task_service.go              # TaskService interface + impl
+└── health_service.go            # DB ping
 repository/
-└── task_repository.go       # Raw SQL via database/sql + lib/pq
+└── task_repository.go           # TaskRepository interface + raw SQL
 model/
-├── task_model.go            # Task struct, TaskRequest DTO, PagedResponse, Pagination
-└── config.go                # AppConfig, DatabaseConfig structs
+├── task_model.go                # Task, TaskRequest (pointer fields), Pagination, PagedResponse
+└── config.go                    # AppConfig, AppInfo, DatabaseConfig
 utils/
-├── errors_response.go       # AppError type, standard error codes, HandleError()
-├── errors.go                # Sentinel errors (ErrTaskNotFound200, ErrTaskAlreadyExists200)
-└── validator.go             # ValidationError type, human-readable tag messages
+├── errors_response.go           # *AppError, GetAppErrorByCode, HandleError
+├── errors.go                    # Sentinels: ErrTaskNotFound200, ErrTaskAlreadyExists200
+└── validator.go                 # ValidationError, MsgForTag
 config/
-├── config.go                # Viper loader with embedded YAML + env override
-└── config.yaml              # Default configuration (embedded at build time)
+├── config.go                    # Viper loader, embedded YAML + env override
+└── config.yaml                  # Default config (embedded at build time)
 migrations/
-├── 0001_create_table_tasks.up.sql    # Create example.tasks + indexes + constraints
-└── 0001_create_table_tasks.down.sql  # DROP TABLE example.tasks
-test/e2e/                    # End-to-end tests against live PostgreSQL
+├── 0001_create_table_tasks.up.sql
+└── 0001_create_table_tasks.down.sql
 ```
+
+> **Note:** there are no `*_test.go` files in the repo as of commit `676844c` (test files were removed). The `make test-*` targets and `test/e2e/` directory referenced in `Makefile` are stubs — re-add tests before relying on them.
 
 ## Common Tasks
 
 ```bash
 go run .                        # Start server on :3000
 
-make test-all                   # Unit tests + e2e tests
-make test-unit                  # Unit tests only (no DB required)
-make test-e2e                   # All e2e tests (requires live DB)
+make test-unit                  # No tests currently — exits with "no test files"
+make test-e2e                   # ./test/e2e directory does not yet exist
+make test-all                   # both above
 
-make test-e2e-get-task-by-id    # Run TestGetTaskByIDE2E only
-make test-e2e-update-task       # Run TestUpdateTaskE2E only
-make test-e2e-delete-task       # Run TestDeleteTaskE2E only
-
-# Single test by name
+# Single test by name (once tests exist)
 go test ./service/... -run TestCreateTask -v -count=1
 ```
 
-E2E tests connect using the same env variables as the server, with optional `E2E_DB_*` overrides for CI isolation:
+E2E tests (when added) connect using `E2E_DB_*` overrides in `Makefile`/test setup, falling back to `DATABASE__*`:
 
 | Env | Fallback | Default |
 |---|---|---|
@@ -114,15 +120,15 @@ E2E tests connect using the same env variables as the server, with optional `E2E
 | `E2E_DB_NAME` | `DATABASE__DBNAME` | `plms` |
 | `E2E_DB_SSLMODE` | `DATABASE__SSLMODE` | `disable` |
 
-Each e2e test truncates and re-seeds `example.tasks` before running, so tests are isolated.
+Each e2e test should truncate and re-seed `example.tasks` for isolation.
 
 ## Database
 
-- Schema: `example`, table: `example.tasks`
-- **Soft deletes:** all read queries filter `WHERE deleted_at IS NULL`. Delete sets `deleted_at = CURRENT_TIMESTAMP`.
-- **Unique title:** enforced by a partial index `WHERE deleted_at IS NULL`, so a deleted title can be reused.
-- **`priority`:** nullable `int`. Valid range 1–5 enforced by a CHECK constraint.
-- **`status`:** `varchar(20)` with CHECK constraint — allowed values: `pending`, `doing`, `done`.
+- Schema: `example`, table: `example.tasks`. The migration does **not** create the schema — run `CREATE SCHEMA IF NOT EXISTS example;` first.
+- **Soft deletes:** all read queries filter `WHERE deleted_at IS NULL`. `DELETE` sets `deleted_at = CURRENT_TIMESTAMP`.
+- **Unique title:** enforced by partial index `WHERE deleted_at IS NULL`, so a deleted title can be reused.
+- **`status`:** `varchar(20)`, `DEFAULT 'pending'`, CHECK in (`pending`, `doing`, `done`). **Not validated at the struct level** — invalid values surface as DB errors, not 400 validation responses.
+- **`priority`:** nullable `int`, CHECK 1–5.
 
 To roll back the migration:
 
@@ -134,9 +140,7 @@ psql -U postgres -d <your_db> -f migrations/0001_create_table_tasks.down.sql
 
 ## API Reference
 
-Base URL: `http://localhost:3000`
-
-All responses are JSON. Errors include a human-readable `error` field. Application-layer errors also include a `code` field.
+Base URL: `http://localhost:3000`. All responses JSON.
 
 ### Error format
 
@@ -148,11 +152,11 @@ All responses are JSON. Errors include a human-readable `error` field. Applicati
 }
 ```
 
-| Code | HTTP status | Meaning |
+| Code | HTTP status (via `HandleError`) | Meaning |
 |---|---|---|
 | `E001` | 404 | Resource not found |
 | `E002` | 400 | Invalid request data |
-| `E003` | 400 | Duplicate title (active task with same title exists) |
+| `E003` | 400 | Duplicate title — **except** `POST /task`, which short-circuits to **409** before `HandleError` runs |
 | `E500` | 500 | Internal server error |
 
 Validation errors on `POST /task` return 400 with a `details` array instead of `code`:
@@ -165,6 +169,42 @@ Validation errors on `POST /task` return 400 with a `details` array instead of `
     { "field": "Priority", "message": "Should be at least 1 characters" }
   ],
   "path": "/task"
+}
+```
+
+Validator tag → message map lives in `utils/validator.go` (`MsgForTag`). Only `required`, `email`, `min`, `max`, `oneof` are mapped — anything else returns `"Invalid value"`.
+
+---
+
+### Health & Info
+
+#### `GET /live`
+
+Liveness probe. Always returns 200 if the process is up.
+
+```json
+{ "status": "ok" }
+```
+
+#### `GET /ready`
+
+Readiness probe. Pings the database; returns 500 (`E500`) if the ping fails.
+
+```json
+{ "status": "ok" }
+```
+
+#### `GET /info`
+
+App metadata sourced from `config.yaml` `app:` section.
+
+```json
+{
+  "service": "example-tasks",
+  "version": "1.0.0",
+  "description": "Go + Fiber v2 + PostgreSQL REST API ...",
+  "environment": "development",
+  "status": "running"
 }
 ```
 
@@ -185,37 +225,26 @@ Content-Type: application/json
 }
 ```
 
-| Field | Type | Required | Constraints |
-|---|---|---|---|
-| `title` | string | yes | Unique among active (non-deleted) tasks |
-| `status` | string | yes | `pending` \| `doing` \| `done` |
-| `priority` | integer | no | 1–5 |
+| Field | Type | Required | Validation | Constraints |
+|---|---|---|---|---|
+| `title` | string | yes | `required` | Unique among active (non-deleted) tasks |
+| `status` | string | yes | `required` (enum enforced by DB CHECK only) | `pending` \| `doing` \| `done` |
+| `priority` | integer | no | `omitempty,min=1,max=5` | 1–5 |
 
 **201 Created**
 
 ```json
-{
-  "message": "Task created successfully"
-}
+{ "message": "Task created successfully" }
 ```
 
-**400 Bad Request** — validation failure
-
-```json
-{
-  "error": "Validation failed",
-  "details": [
-    { "field": "Status", "message": "This field is required" }
-  ],
-  "path": "/task"
-}
-```
+**400 Bad Request** — validation failure (see error format above).
 
 **409 Conflict** — title already in use by an active task
 
 ```json
 {
   "error": "task with the same title already exists",
+  "code": "E003",
   "path": "/task"
 }
 ```
@@ -232,13 +261,13 @@ GET /tasks?size=2&cursor=0&sort_with=id&sort_by=asc HTTP/1.1
 
 | Query param | Type | Default | Constraints |
 |---|---|---|---|
-| `cursor` | integer | `0` | ID of the last item on the previous page. `0` = first page. |
+| `cursor` | integer | `0` | ID of last item on previous page; `0` = first page |
 | `size` | integer | `20` | Min 1 |
 | `priority` | integer | `0` | `0` = no filter; `1`–`5` = exact match |
 | `sort_with` | string | `id` | `id` \| `priority` \| `title` |
 | `sort_by` | string | `asc` | `asc` \| `desc` |
 
-Cursor pagination: `pagination.next_cursor` is the ID of the last item returned. Pass it as `cursor` on the next request. A `next_cursor` of `0` means the page was empty.
+Cursor pagination: `pagination.next_cursor` is the ID of the last item returned. Pass it as `cursor` on the next request. `next_cursor = 0` means the page was empty.
 
 **200 OK**
 
@@ -253,18 +282,10 @@ Cursor pagination: `pagination.next_cursor` is the ID of the last item returned.
         "created_at": "2026-04-23T10:00:00Z",
         "updated_at": "2026-04-23T10:00:00Z",
         "priority": 2
-      },
-      {
-        "id": 2,
-        "title": "Deploy to staging",
-        "status": "doing",
-        "created_at": "2026-04-23T10:05:00Z",
-        "updated_at": "2026-04-23T10:05:00Z",
-        "priority": null
       }
     ],
     "pagination": {
-      "next_cursor": 2,
+      "next_cursor": 1,
       "page_size": 2
     }
   }
@@ -274,10 +295,7 @@ Cursor pagination: `pagination.next_cursor` is the ID of the last item returned.
 **400 Bad Request** — invalid query parameters
 
 ```json
-{
-  "error": "Invalid sort parameters",
-  "path": "/tasks"
-}
+{ "error": "Invalid sort parameters", "path": "/tasks" }
 ```
 
 ---
@@ -285,10 +303,6 @@ Cursor pagination: `pagination.next_cursor` is the ID of the last item returned.
 ### GET /task/:id
 
 Get a single task by ID.
-
-```http
-GET /task/1 HTTP/1.1
-```
 
 **200 OK**
 
@@ -308,95 +322,59 @@ GET /task/1 HTTP/1.1
 **404 Not Found** — task does not exist or is soft-deleted
 
 ```json
-{
-  "error": "resource not found"
-}
+{ "error": "resource not found", "code": "E001" }
 ```
 
 ---
 
 ### PATCH /task/:id
 
-Partially update a task. Only `status` and `priority` are written to the database; `title` is parsed but not updated. `updated_at` is always refreshed on a successful update.
+Partially update a task. `updated_at` is always refreshed.
 
 ```http
 PATCH /task/1 HTTP/1.1
 Content-Type: application/json
 
-{
-  "status": "done",
-  "priority": 5
-}
+{ "status": "done", "priority": 5 }
 ```
 
 | Field | Type | Required | Constraints |
 |---|---|---|---|
-| `status` | string | no | `pending` \| `doing` \| `done` |
-| `priority` | integer | no | 1–5 |
+| `title` | string | no | Written only if non-empty; subject to active-title unique index |
+| `status` | string | no | DB CHECK: `pending` \| `doing` \| `done` |
+| `priority` | integer | no | DB CHECK: 1–5 |
+
+> ⚠️ **Side effect**: the repository's UPDATE statement always sets `deleted_at = NULL`, and the `WHERE` clause does **not** filter `deleted_at IS NULL`. PATCHing a soft-deleted task will **resurrect** it.
 
 **200 OK**
 
 ```json
-{
-  "message": "Task updated successfully"
-}
+{ "message": "Task updated successfully" }
 ```
 
-**400 Bad Request** — invalid `:id` or malformed body
-
-```json
-{
-  "error": "Invalid task ID",
-  "path": "/task/abc"
-}
-```
+**400 Bad Request** — invalid `:id`, malformed body, or duplicate title (E003 falls through `HandleError` here, unlike POST).
 
 **404 Not Found**
 
 ```json
-{
-  "error": "resource not found",
-  "code": "E001",
-  "path": "/task/99999"
-}
+{ "error": "resource not found", "code": "E001", "path": "/task/99999" }
 ```
 
 ---
 
 ### DELETE /task/:id
 
-Soft-delete a task. Sets `deleted_at = CURRENT_TIMESTAMP`; the row remains in the database. A deleted task's title can be reused by a new task.
-
-```http
-DELETE /task/1 HTTP/1.1
-```
+Soft-delete a task. Sets `deleted_at = CURRENT_TIMESTAMP`; the row remains. A deleted task's title can be reused.
 
 **200 OK**
 
 ```json
-{
-  "message": "Task deleted successfully"
-}
+{ "message": "Task deleted successfully" }
 ```
 
-**400 Bad Request** — invalid `:id`
+**400 Bad Request** — invalid `:id`.
 
-```json
-{
-  "error": "Invalid task ID",
-  "path": "/task/abc"
-}
-```
-
-**404 Not Found** — task does not exist or was already deleted
-
-```json
-{
-  "error": "resource not found",
-  "code": "E001",
-  "path": "/task/99999"
-}
-```
+**404 Not Found** — task does not exist or was already deleted.
 
 ---
 
@@ -404,20 +382,19 @@ DELETE /task/1 HTTP/1.1
 
 ```
 HTTP request
-     |
-     v
-  handler/       Parse request, validate input (go-playground/validator),
-                 call service, write JSON response
-     |
-     v
-  service/       Business logic, secondary validation, map error codes
-                 to *AppError
-     |
-     v
-  repository/    Raw SQL (database/sql + lib/pq), returns string error
-                 code + Go error
-     |
-     v
+     │
+     ▼
+  handler/       Parse + validate (go-playground/validator), call service,
+                 write JSON response
+     │
+     ▼
+  service/       Business logic, secondary validation, map repo error codes
+                 → *AppError or sentinel error
+     │
+     ▼
+  repository/    Raw SQL (database/sql + lib/pq), returns (errorCode string, error)
+     │
+     ▼
   PostgreSQL     example.tasks
 ```
 
@@ -427,12 +404,23 @@ Dependency injection is wired manually in `main.go`:
 taskRepo    := repository.NewTaskRepository(db)
 taskService := service.NewTaskService(taskRepo)
 taskHandler := handler.NewTaskHandler(taskService)
+
+healthSvc     := service.NewHealthService(db)
+healthHandler := handler.NewHealthHandler(healthSvc, appConfig.AppInfo)
 ```
 
-Both `TaskRepository` and `TaskService` are interfaces, making unit testing with mocks straightforward (see `service/task_service_test.go`).
+Both `TaskRepository` and `TaskService` are interfaces, so unit tests can swap in mocks.
 
 ### Error propagation
 
-1. Repository returns `("E001", nil)` or `("E500", err)`.
-2. Service calls `utils.GetAppErrorByCode(code)` to get an `*AppError`.
-3. Handler calls `utils.HandleError(c, err)`, which maps `AppError.ErrorCode` to an HTTP status and writes the JSON body.
+1. Repository returns `(errorCode, err)` — e.g. `("E001", nil)`, `("E003", nil)`, `("E500", err)`.
+2. Service calls `utils.GetAppErrorByCode(code)` to map to an `*AppError`.
+   - `CreateTask` further translates `ErrDuplicateEntry` → sentinel `ErrTaskAlreadyExists200` so the handler can return **409**.
+3. Handler calls `utils.HandleError(c, err)`, which maps `AppError.ErrorCode` → HTTP status and writes the JSON body.
+
+### Known inconsistencies
+
+- `POST /task` returns **409** for duplicate title; `PATCH /task/:id` returns **400** for the same condition because `HandleError` maps `E003` → 400.
+- `GET /task/:id` does not return an `AppError` for "not found" — service returns an empty `Task{}`, handler converts ID=0 to 404 inline.
+- `database.sslmode` is in the config but `main.go` hardcodes `sslmode=disable` in the DSN, so the value is unused.
+- `repository.UpdateTask` always sets `deleted_at = NULL` and lacks a `deleted_at IS NULL` WHERE filter — soft-deleted tasks can be resurrected via PATCH.

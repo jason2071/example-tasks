@@ -5,84 +5,103 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Run server
+# Run server (listens :3000)
 go run .
 
-# Run all tests
-make test-all
+# Tests — NOTE: as of commit 676844c all *_test.go files were deleted.
+# Targets below currently report "no test files". Re-add tests before relying on them.
+make test-unit                  # ./... excluding /test/e2e
+make test-e2e                   # ./test/e2e (dir does not exist yet)
+make test-all                   # both
 
-# Run unit tests only (excludes e2e)
-make test-unit
-
-# Run e2e tests (requires live DB)
-make test-e2e
-
-# Run single test by name
+# Single test by name (once tests exist)
 go test ./service/... -run TestGetTaskByID -v -count=1
 
-# Run specific e2e test
-make test-e2e-get-task-by-id   # or test-e2e-update-task, test-e2e-delete-task
+# E2E DB isolation: E2E_DB_* vars override DATABASE__* (see README §Common Tasks).
 ```
 
 ## Architecture
 
-Handler → Service → Repository layered architecture with explicit DI wired in `main.go`.
+Handler → Service → Repository, manual DI in `main.go`. PostgreSQL via `database/sql` + `lib/pq`, no ORM.
 
 ```
-main.go          # Fiber setup, DI wiring: repo → service → handler
-handler/         # HTTP layer: parse request, call service, return JSON
-service/         # Business logic, validation, error mapping
-repository/      # Raw SQL via database/sql + lib/pq (PostgreSQL)
-model/           # Request DTOs, Task struct, pagination types
-utils/           # AppError type, error codes, HandleError(), validator mapping
-config/          # Viper-based YAML config with env override support
-migrations/      # SQL DDL (example.tasks table)
-test/e2e/        # End-to-end tests against live server
+main.go                 # Fiber setup, builds db -> repo -> service -> handler
+handler/
+  task_handler.go       # /task* CRUD
+  health_handler.go     # /live /ready /info
+service/
+  task_service.go       # TaskService interface + impl, validation, error mapping
+  health_service.go     # ping checks
+repository/
+  task_repository.go    # TaskRepository interface + raw SQL
+model/
+  task_model.go         # Task, TaskRequest (pointer fields for partial update), PagedResponse
+  config.go             # AppConfig, DatabaseConfig, AppInfo
+utils/
+  errors_response.go    # *AppError, GetAppErrorByCode, HandleError (code -> HTTP status)
+  errors.go             # Sentinel errors: ErrTaskNotFound200, ErrTaskAlreadyExists200
+  validator.go          # ValidationError type, MsgForTag (validator-tag -> message)
+config/
+  config.go             # Viper loader, embeds config.yaml, env override
+  config.yaml           # Embedded at build (//go:embed). Edits need rebuild.
+migrations/
+  0001_create_table_tasks.up.sql / .down.sql
 ```
 
-**Interfaces**: `TaskRepository` and `TaskService` defined for DI; handler depends on service interface, service depends on repository interface.
+`TaskRepository` and `TaskService` are interfaces — handler/service depend on the interface, enabling mocks.
 
-## Error Handling
+## Routes (all wired in main.go)
 
-Custom `AppError` in `utils/errors_response.go` with standardized codes:
-- `E001` = not found → 404
-- `E002` = invalid request → 400
-- `E003` = duplicate → 409
-- `E500` = server error → 500
+| Method | Path        | Handler                  |
+|--------|-------------|--------------------------|
+| GET    | `/`         | inline "Hello, World!"   |
+| GET    | `/live`     | healthHandler.Live       |
+| GET    | `/ready`    | healthHandler.Ready      |
+| GET    | `/info`     | healthHandler.Info       |
+| POST   | `/task`     | createTask (201)         |
+| GET    | `/tasks`    | list w/ cursor pagination|
+| GET    | `/task/:id` | getByID                  |
+| PATCH  | `/task/:id` | partial update           |
+| DELETE | `/task/:id` | soft delete              |
 
-`utils.HandleError(ctx, err)` maps `AppError` → HTTP status automatically. All layers return typed errors; handlers never construct error responses directly.
+## Error model — read carefully
+
+`AppError{ErrorCode, ErrorMessage}` in `utils/errors_response.go`. Codes:
+
+| Code | Sentinel             | `HandleError` HTTP |
+|------|----------------------|--------------------|
+| E001 | ErrNotFound          | 404                |
+| E002 | ErrInvalidRequest    | 400                |
+| E003 | ErrDuplicateEntry    | **400** (not 409)  |
+| E500 | ErrInternalServer    | 500                |
+| SUCCESS | Success           | n/a                |
+
+**Inconsistency to know**: only `CreateTask` handler short-circuits duplicates to **409** using `ErrTaskAlreadyExists200` (sentinel from `utils/errors.go`) before reaching `HandleError`. `UpdateTask` lets E003 fall through `HandleError` and returns **400**. Same code, different status by route.
+
+`GetTaskByID` returns `model.Task{}` (ID=0) for not-found, no error — handler converts to 404 inline. Other handlers rely on `HandleError`.
 
 ## Database
 
-- PostgreSQL via `database/sql` + `lib/pq`. No ORM.
-- Soft deletes: all queries filter `deleted_at IS NULL`.
-- Keyset pagination by task ID (cursor-based), supports `sort_with`/`sort_by` query params.
-- Config via `config/config.yaml` (embedded); env overrides use double-underscore separator (e.g. `DATABASE__HOST`).
+- Schema `example`, table `example.tasks`. Migration must be applied manually (`psql -f migrations/...up.sql`).
+- **Soft delete**: reads filter `deleted_at IS NULL`; delete sets `deleted_at = CURRENT_TIMESTAMP`.
+- **Unique title**: partial unique index where `deleted_at IS NULL` — deleted titles can be reused.
+- **`status`**: `varchar(20)` CHECK in (`pending`, `doing`, `done`).
+- **`priority`**: nullable int, CHECK 1–5.
+- **Pagination**: keyset by `id` with `cursor` query param. `next_cursor = 0` ⇔ empty page. `sort_with` ∈ {id, priority, title}, `sort_by` ∈ {asc, desc}.
 
-## API
+### `UpdateTask` footguns
 
-5 REST endpoints on Fiber v2:
-- `POST /task` — create (201)
-- `GET /tasks` — list with cursor pagination
-- `GET /task/:id` — get by ID
-- `PATCH /task/:id` — partial update
-- `DELETE /task/:id` — soft delete
+`repository.UpdateTask` always writes `deleted_at = NULL` in the SET clause — **PATCH on a soft-deleted row will resurrect it** if matched. WHERE has no `deleted_at IS NULL` guard.
 
-Priority field: integer 1–5.
+Repo also writes `title` when `task.Title != nil && *task.Title != ""` (contradicts README claim that title is parsed-but-not-updated).
 
-## Agents
+## Config
 
-Use specialist agents for complex tasks. Invoke via `Agent` tool with `subagent_type`.
+Viper loads embedded `config/config.yaml`; env vars override using `__` separator (`DATABASE__HOST`, `DATABASE__PORT`, `DATABASE__USER`, `DATABASE__PASSWORD`, `DATABASE__DBNAME`, `DATABASE__SSLMODE`). `.env` auto-loaded in local. `sslmode` from config is **ignored** in `main.go` — DSN hardcodes `sslmode=disable`.
 
-| Task | Agent |
-|------|-------|
-| New endpoint / service / repository | `backend-developer` |
-| Unit or table-driven tests | `test-writer` |
-| PR / diff / function review | `code-reviewer` |
-| Schema design or migration | `database-designer` |
-| Slow query / EXPLAIN analysis | `sql-optimizer` |
-| Refactor, decouple, reduce duplication | `refactor-specialist` |
-| Full feature (handler + service + repo + test) | `tech-lead` (orchestrates sub-agents) |
-| Explore unknown files or search codebase | `Explore` |
+## Conventions (from AGENTS.md)
 
-**When to parallelize**: run independent agents in single message (e.g., `test-writer` + `code-reviewer` simultaneously after implementing a feature).
+- Layer boundaries strict: handler never touches DB; repo never returns Fiber types.
+- Repo returns `(errorCode string, err error)` pair; service maps via `GetAppErrorByCode`.
+- Parameterized queries only. No `SELECT *`.
+- Validation: `go-playground/validator/v10` on DTOs in handler; secondary checks in service.
