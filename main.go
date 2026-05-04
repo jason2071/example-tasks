@@ -24,12 +24,6 @@ func main() {
 
 	db_cfg := appConfig.Database
 
-	fmt.Printf("Connecting to host: %s, database: %s, user: %s\n",
-		db_cfg.Host,
-		db_cfg.Database,
-		db_cfg.User,
-	)
-
 	// database connection
 	pqInfo := fmt.Sprintf("host=%s port=%d user=%s "+"password=%s dbname=%s sslmode=disable", db_cfg.Host, db_cfg.Port, db_cfg.User, db_cfg.Password, db_cfg.Database)
 
