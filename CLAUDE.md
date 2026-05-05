@@ -8,16 +8,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Run server (listens :3000)
 go run .
 
-# Tests — NOTE: as of commit 676844c all *_test.go files were deleted.
-# Targets below currently report "no test files". Re-add tests before relying on them.
-make test-unit                  # ./... excluding /test/e2e
-make test-e2e                   # ./test/e2e (dir does not exist yet)
-make test-all                   # both
+# Build
+go build -o example-tasks .
 
-# Single test by name (once tests exist)
-go test ./service/... -run TestGetTaskByID -v -count=1
+# Tests — NOTE: all *_test.go files were deleted (commit 676844c) and the
+# Makefile was removed (commit 13ab01a). Re-add tests before relying on these:
+go test ./...                                        # all packages
+go test ./service/... -run TestGetTaskByID -v -count=1  # single test by name
 
-# E2E DB isolation: E2E_DB_* vars override DATABASE__* (see README §Common Tasks).
+# DB setup (required before first run)
+psql -U postgres -d <db> -c "CREATE SCHEMA IF NOT EXISTS example;"
+psql -U postgres -d <db> -f migrations/0001_create_table_tasks.up.sql
 ```
 
 ## Architecture
