@@ -79,7 +79,9 @@ migrations/
 
 **Inconsistency to know**: only `CreateTask` handler short-circuits duplicates to **409** using `ErrTaskAlreadyExists200` (sentinel from `utils/errors.go`) before reaching `HandleError`. `UpdateTask` lets E003 fall through `HandleError` and returns **400**. Same code, different status by route.
 
-`GetTaskByID` returns `model.Task{}` (ID=0) for not-found, no error — handler converts to 404 inline. Other handlers rely on `HandleError`.
+`GetTaskByID` returns `model.Task{}` (ID=0) for not-found, no error — handler converts to 404 inline. Other handlers rely on `HandleError`. The handler also ignores the id-parse error (`id, _ := strconv.ParseInt(...)`), so a non-numeric `:id` becomes `0` → 404, not 400.
+
+**`GET /tasks` response shape**: service returns `*model.PagedResponse` (`{data, pagination{next_cursor, page_size}}`), but the handler assigns it to a var named `tasks` and wraps it under the `"tasks"` key. Actual body is `{"tasks": {"data": [...], "pagination": {...}}}` — not a flat array. No total-count field; `repository.taskTotalRecords` exists but is dead code (never called).
 
 ## Database
 
@@ -88,7 +90,7 @@ migrations/
 - **Unique title**: partial unique index where `deleted_at IS NULL` — deleted titles can be reused.
 - **`status`**: `varchar(20)` CHECK in (`pending`, `doing`, `done`).
 - **`priority`**: nullable int, CHECK 1–5.
-- **Pagination**: keyset by `id` with `cursor` query param. `next_cursor = 0` ⇔ empty page. `sort_with` ∈ {id, priority, title}, `sort_by` ∈ {asc, desc}.
+- **Pagination**: keyset by `id` with `cursor` query param. `next_cursor` = last row's `id` (or `0` on empty page); there is no has-more flag, so a full last page still returns a cursor — clients detect the end only by getting an empty next page. `sort_with` ∈ {id, priority, title}, `sort_by` ∈ {asc, desc}.
 
 ### `UpdateTask` footguns
 
@@ -100,7 +102,10 @@ Repo also writes `title` when `task.Title != nil && *task.Title != ""` (contradi
 
 Viper loads embedded `config/config.yaml`; env vars override using `__` separator (`DATABASE__HOST`, `DATABASE__PORT`, `DATABASE__USER`, `DATABASE__PASSWORD`, `DATABASE__DBNAME`, `DATABASE__SSLMODE`). `.env` auto-loaded in local. `sslmode` from config is **ignored** in `main.go` — DSN hardcodes `sslmode=disable`.
 
-## Conventions (from AGENTS.md)
+## Conventions
+
+(Originally from `AGENTS.md`, now deleted — these rules live here.)
+
 
 - Layer boundaries strict: handler never touches DB; repo never returns Fiber types.
 - Repo returns `(errorCode string, err error)` pair; service maps via `GetAppErrorByCode`.
