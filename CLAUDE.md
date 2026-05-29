@@ -4,22 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+A `Makefile` wraps the common tasks (`make help` lists all). Raw commands:
+
 ```bash
 # Run server (listens :3000)
-go run .
+go run .            # or: make run
+make dev            # hot-reload via air (.air.toml builds ./tmp/api, kills :3000 first)
 
 # Build
-go build -o example-tasks .
+go build -o example-tasks .   # or: make build  (-> ./tmp/api)
 
-# Tests — NOTE: all *_test.go files were deleted (commit 676844c) and the
-# Makefile was removed (commit 13ab01a). Re-add tests before relying on these:
-go test ./...                                        # all packages
-go test ./service/... -run TestGetTaskByID -v -count=1  # single test by name
+# Tests — NOTE: all *_test.go files were deleted (commit 676844c). Re-add before these work:
+go test ./...                                                  # all packages (make test)
+go test ./internal/service/... -run TestGetTaskByID -v -count=1  # single test (make test-one PKG=./internal/service NAME=TestGetTaskByID)
 
-# DB setup (required before first run)
+# DB setup (required before first run; make db-schema / migrate-up wrap these, override DB= PGUSER=)
 psql -U postgres -d <db> -c "CREATE SCHEMA IF NOT EXISTS example;"
 psql -U postgres -d <db> -f migrations/0001_create_table_tasks.up.sql
 ```
+
+Local dev connects via `.env` (Viper env override; e.g. `DATABASE__PORT=5433`, `DATABASE__DBNAME=...`). `.env`, `/example-tasks` binary, `tmp/`, and `graphify-out/` are gitignored.
 
 ## Architecture
 
