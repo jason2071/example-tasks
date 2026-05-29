@@ -23,35 +23,38 @@ psql -U postgres -d <db> -f migrations/0001_create_table_tasks.up.sql
 
 ## Architecture
 
-Handler → Service → Repository, manual DI in `main.go`. PostgreSQL via `database/sql` + `lib/pq`, no ORM.
+Handler → Service → Repository, manual DI in `main.go`. PostgreSQL via `database/sql` + `lib/pq`, no ORM. All app packages live under `internal/` (not importable outside the module); module path is `example-tasks`, so imports are `example-tasks/internal/<pkg>`.
 
 ```
-main.go                 # Fiber setup, builds db -> repo -> service -> handler
-handler/
-  task_handler.go       # /task* CRUD
-  health_handler.go     # /live /ready /info
-service/
-  task_service.go       # TaskService interface + impl, validation, error mapping
-  health_service.go     # ping checks
-repository/
-  task_repository.go    # TaskRepository interface + raw SQL
-model/
-  task_model.go         # Task, TaskRequest (pointer fields for partial update), PagedResponse
-  config.go             # AppConfig, DatabaseConfig, AppInfo
-utils/
-  errors_response.go    # *AppError, GetAppErrorByCode, HandleError (code -> HTTP status)
-  errors.go             # Sentinel errors: ErrTaskNotFound200, ErrTaskAlreadyExists200
-  validator.go          # ValidationError type, MsgForTag (validator-tag -> message)
-config/
-  config.go             # Viper loader, embeds config.yaml, env override
-  config.yaml           # Embedded at build (//go:embed). Edits need rebuild.
+main.go                 # bootstrap only: LoadConfig -> newDB -> DI wiring -> router.Setup -> Listen(:3000)
+internal/
+  router/
+    router.go           # router.Setup(app, taskHandler, healthHandler) — all routes wired here
+  handler/
+    task_handler.go     # /task* CRUD
+    health_handler.go   # /live /ready /info
+  service/
+    task_service.go     # TaskService interface + impl, validation, error mapping
+    health_service.go   # ping checks
+  repository/
+    task_repository.go  # TaskRepository interface + raw SQL
+  model/
+    task_model.go       # Task, TaskRequest (pointer fields for partial update), PagedResponse
+    config.go           # AppConfig, DatabaseConfig, AppInfo
+  utils/
+    errors_response.go  # *AppError, GetAppErrorByCode, HandleError (code -> HTTP status)
+    errors.go           # Sentinel errors: ErrTaskNotFound200, ErrTaskAlreadyExists200
+    validator.go        # ValidationError type, MsgForTag (validator-tag -> message)
+  config/
+    config.go           # Viper loader, embeds config.yaml, env override
+    config.yaml         # Embedded at build (//go:embed). Edits need rebuild.
 migrations/
   0001_create_table_tasks.up.sql / .down.sql
 ```
 
 `TaskRepository` and `TaskService` are interfaces — handler/service depend on the interface, enabling mocks.
 
-## Routes (all wired in main.go)
+## Routes (all wired in `internal/router/router.go`)
 
 | Method | Path        | Handler                  |
 |--------|-------------|--------------------------|

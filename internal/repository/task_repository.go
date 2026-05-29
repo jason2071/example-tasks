@@ -2,8 +2,8 @@ package repository
 
 import (
 	"database/sql"
-	"example-tasks/model"
-	"example-tasks/utils"
+	"example-tasks/internal/model"
+	"example-tasks/internal/utils"
 	"fmt"
 	"log"
 	"strings"

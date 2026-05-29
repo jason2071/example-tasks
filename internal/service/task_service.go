@@ -1,9 +1,9 @@
 package service
 
 import (
-	"example-tasks/model"
-	"example-tasks/repository"
-	"example-tasks/utils"
+	"example-tasks/internal/model"
+	"example-tasks/internal/repository"
+	"example-tasks/internal/utils"
 	"fmt"
 )
 

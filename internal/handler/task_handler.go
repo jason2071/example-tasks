@@ -2,13 +2,13 @@ package handler
 
 import (
 	"errors"
-	"example-tasks/service"
+	"example-tasks/internal/service"
 	"log"
 	"strconv"
 
-	"example-tasks/model"
+	"example-tasks/internal/model"
 
-	"example-tasks/utils"
+	"example-tasks/internal/utils"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"

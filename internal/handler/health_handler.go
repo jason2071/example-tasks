@@ -3,9 +3,9 @@ package handler
 import (
 	"log"
 
-	"example-tasks/model"
-	"example-tasks/service"
-	"example-tasks/utils"
+	"example-tasks/internal/model"
+	"example-tasks/internal/service"
+	"example-tasks/internal/utils"
 
 	"github.com/gofiber/fiber/v2"
 )

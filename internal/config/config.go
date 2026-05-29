@@ -5,7 +5,7 @@ import (
 	_ "embed"
 	"strings"
 
-	"example-tasks/model"
+	"example-tasks/internal/model"
 
 	"github.com/spf13/viper"
 	"github.com/subosito/gotenv"
