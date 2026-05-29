@@ -32,3 +32,12 @@ go.work.sum
 .vscode/
 .claude/
 tmp/
+
+# OS junk
+.DS_Store
+
+# Built binary (go build -o example-tasks .)
+/example-tasks
+
+# graphify knowledge graph (generated, regenerable via /graphify)
+graphify-out/
