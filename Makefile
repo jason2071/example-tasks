@@ -1,9 +1,26 @@
-.PHONY: help run dev build test test-one fmt vet tidy clean db-schema migrate-up migrate-down
+.PHONY: help run dev build test test-one coverage coverage-html fmt vet tidy clean db-schema migrate-up migrate-down
+
+# Auto-load .env so `make migrate-up` targets the same DB the app uses (Viper reads .env
+# for the app, but make does not). Strip surrounding quotes from values; CLI args still win.
+-include .env
+DATABASE__HOST     := $(patsubst "%",%,$(DATABASE__HOST))
+DATABASE__PORT     := $(patsubst "%",%,$(DATABASE__PORT))
+DATABASE__USER     := $(patsubst "%",%,$(DATABASE__USER))
+DATABASE__PASSWORD := $(patsubst "%",%,$(DATABASE__PASSWORD))
+DATABASE__DBNAME   := $(patsubst "%",%,$(DATABASE__DBNAME))
 
 # DB connection (override on the CLI, e.g. `make migrate-up DB=mydb PGUSER=postgres`)
-PGUSER ?= postgres
-DB     ?= postgres
+# Defaults fall back to .env values (DATABASE__*) so `make migrate-up` targets the dev DB.
+PGPASSWORD ?= $(DATABASE__PASSWORD)
+export PGPASSWORD
+PGHOST ?= $(or $(DATABASE__HOST),localhost)
+PGPORT ?= $(or $(DATABASE__PORT),5432)
+PGUSER ?= $(or $(DATABASE__USER),postgres)
+DB     ?= $(or $(DATABASE__DBNAME),postgres)
+PSQL   := psql -h $(PGHOST) -p $(PGPORT) -U $(PGUSER) -d $(DB)
 BIN    := ./tmp/api
+COVERAGE      := coverage.out
+COVERAGE_HTML := coverage.html
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -24,6 +41,14 @@ test: ## Run all tests
 test-one: ## Run a single test: make test-one PKG=./internal/service NAME=TestGetTaskByID
 	go test $(PKG) -run $(NAME) -v -count=1
 
+coverage: ## Run tests with coverage, print per-func summary + total
+	go test ./... -covermode=atomic -coverprofile=$(COVERAGE)
+	go tool cover -func=$(COVERAGE) | tail -n 1
+
+coverage-html: coverage ## Generate + open HTML coverage report
+	go tool cover -html=$(COVERAGE) -o $(COVERAGE_HTML)
+	@echo "open $(COVERAGE_HTML)"
+
 fmt: ## Format code
 	gofmt -w .
 
@@ -34,13 +59,17 @@ tidy: ## Tidy module dependencies
 	go mod tidy
 
 clean: ## Remove build artifacts
-	rm -rf tmp $(BIN)
+	rm -rf tmp $(BIN) $(COVERAGE) $(COVERAGE_HTML)
 
 db-schema: ## Create the `example` schema
-	psql -U $(PGUSER) -d $(DB) -c "CREATE SCHEMA IF NOT EXISTS example;"
+	$(PSQL) -c "CREATE SCHEMA IF NOT EXISTS example;"
 
-migrate-up: ## Apply migration 0001 (up)
-	psql -U $(PGUSER) -d $(DB) -f migrations/0001_create_table_tasks.up.sql
+migrate-up: db-schema ## Apply all *.up.sql migrations in order
+	@for f in $(sort $(wildcard migrations/*.up.sql)); do \
+		echo "==> $$f"; $(PSQL) -v ON_ERROR_STOP=1 -f $$f || exit 1; \
+	done
 
-migrate-down: ## Revert migration 0001 (down)
-	psql -U $(PGUSER) -d $(DB) -f migrations/0001_create_table_tasks.down.sql
+migrate-down: ## Revert all *.down.sql migrations in reverse order
+	@for f in $(shell ls -r migrations/*.down.sql); do \
+		echo "==> $$f"; $(PSQL) -v ON_ERROR_STOP=1 -f $$f || exit 1; \
+	done
