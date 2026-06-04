@@ -30,6 +30,9 @@ ADD COLUMN IF NOT EXISTS "priority" int NULL;
 CREATE INDEX IF NOT EXISTS idx_example_tasks_priority ON example.tasks (priority);
 
 -- Add check constraint for priority range (1 to 5)
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so drop-then-add to stay idempotent.
+ALTER TABLE example.tasks
+DROP CONSTRAINT IF EXISTS check_priority_range;
 ALTER TABLE example.tasks ADD CONSTRAINT "check_priority_range" CHECK (
     priority IS NULL
     OR (
