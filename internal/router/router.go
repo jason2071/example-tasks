@@ -1,24 +1,26 @@
 package router
 
 import (
+	"net/http"
+
 	"example-tasks/internal/handler"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
-// Setup wires all HTTP routes onto the Fiber app.
-func Setup(app *fiber.App, taskHandler *handler.TaskHandlerImpl, healthHandler *handler.HealthHandler) {
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello, World!")
+// Setup wires all HTTP routes onto the Gin engine.
+func Setup(app *gin.Engine, taskHandler *handler.TaskHandlerImpl, healthHandler *handler.HealthHandler) {
+	app.GET("/", func(c *gin.Context) {
+		c.String(http.StatusOK, "Hello, World!")
 	})
 
-	app.Get("/live", healthHandler.Live)
-	app.Get("/ready", healthHandler.Ready)
-	app.Get("/info", healthHandler.Info)
+	app.GET("/live", healthHandler.Live)
+	app.GET("/ready", healthHandler.Ready)
+	app.GET("/info", healthHandler.Info)
 
-	app.Post("/task", taskHandler.CreateTask)
-	app.Get("/tasks", taskHandler.GetTasks)
-	app.Get("/task/:id", taskHandler.GetTaskByID)
-	app.Patch("/task/:id", taskHandler.UpdateTask)
-	app.Delete("/task/:id", taskHandler.DeleteTask)
+	app.POST("/task", taskHandler.CreateTask)
+	app.GET("/tasks", taskHandler.GetTasks)
+	app.GET("/task/:id", taskHandler.GetTaskByID)
+	app.PATCH("/task/:id", taskHandler.UpdateTask)
+	app.DELETE("/task/:id", taskHandler.DeleteTask)
 }

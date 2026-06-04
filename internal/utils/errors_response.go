@@ -3,8 +3,9 @@ package utils
 import (
 	"errors"
 	"fmt"
+	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 )
 
 type AppError struct {
@@ -61,26 +62,28 @@ func GetAppErrorByCode(code string) *AppError {
 	}
 }
 
-// func handler response error
-func HandleError(c *fiber.Ctx, err error) error {
+// HandleError writes a JSON error response for *AppError and reports
+// whether it handled the error (true = response written).
+func HandleError(c *gin.Context, err error) bool {
 	if appErr, ok := err.(*AppError); ok {
 		var statusCode int
 		switch appErr.ErrorCode {
 		case "E001":
-			statusCode = fiber.StatusNotFound
+			statusCode = http.StatusNotFound
 		case "E002", "E003":
-			statusCode = fiber.StatusBadRequest
+			statusCode = http.StatusBadRequest
 		case "E500":
-			statusCode = fiber.StatusInternalServerError
+			statusCode = http.StatusInternalServerError
 		default:
-			statusCode = fiber.StatusInternalServerError
+			statusCode = http.StatusInternalServerError
 		}
 
-		return c.Status(statusCode).JSON(fiber.Map{
+		c.JSON(statusCode, gin.H{
 			"error": appErr.ErrorMessage.Error(),
 			"code":  appErr.ErrorCode,
-			"path":  c.Path(),
+			"path":  c.Request.URL.Path,
 		})
+		return true
 	}
-	return nil
+	return false
 }

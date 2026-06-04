@@ -12,7 +12,7 @@ import (
 	"example-tasks/internal/router"
 	"example-tasks/internal/service"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gin-gonic/gin"
 	_ "github.com/lib/pq"
 )
 
@@ -38,10 +38,10 @@ func main() {
 	healthHandler := handler.NewHealthHandler(healthSvc, appConfig.AppInfo)
 
 	// server
-	app := fiber.New()
+	app := gin.Default()
 	router.Setup(app, taskHandler, healthHandler)
 
-	log.Fatal(app.Listen(":3000"))
+	log.Fatal(app.Run(":3000"))
 }
 
 // newDB opens and verifies the PostgreSQL connection.
