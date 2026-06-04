@@ -1,4 +1,4 @@
-.PHONY: help run dev build test test-one coverage coverage-html fmt vet tidy clean db-schema migrate-up migrate-down
+.PHONY: help run dev build test test-one coverage coverage-html fmt vet tidy mock clean db-schema migrate-up migrate-down
 
 # Auto-load .env so `make migrate-up` targets the same DB the app uses (Viper reads .env
 # for the app, but make does not). Strip surrounding quotes from values; CLI args still win.
@@ -57,6 +57,9 @@ vet: ## Static checks
 
 tidy: ## Tidy module dependencies
 	go mod tidy
+
+mock: ## Generate testify mocks from .mockery.yaml
+	mockery
 
 clean: ## Remove build artifacts
 	rm -rf tmp $(BIN) $(COVERAGE) $(COVERAGE_HTML)
